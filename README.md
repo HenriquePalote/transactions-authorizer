@@ -1,38 +1,18 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
-</p>
+## Descrição
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Exemplo de aplicação para autorização de transações. Onde se deve processar a transação, validando a disponibilidade de saldo da conta de origem.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Cada transação possui uma tipagem, definido pelo código MCC, assim o saldo a ser levado em consideração na autorização deve ser o referente aquele tipo.
 
-## Description
+Há um tipo principal, onde o mesmo pode ser usado fallback para caso transações sem disponibilidade de saldo de outros tipos.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Installation
+### Installation
 
 ```bash
 $ yarn install
 ```
 
-## Running the app
+### Running the app
 
 ```bash
 # development
@@ -45,29 +25,84 @@ $ yarn run start:dev
 $ yarn run start:prod
 ```
 
-## Test
+### Test
 
 ```bash
 # unit tests
 $ yarn run test
 
-# e2e tests
-$ yarn run test:e2e
-
 # test coverage
 $ yarn run test:cov
 ```
 
-## Support
+### Database Setup
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
 
-## Stay in touch
+# initialize postgres 
+$ docker-compose up -d
 
-- Author - [Kamil Myśliwiec](https://kamilmysliwiec.com)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+# migrate database schema
+$ yarn run setup:database:migrate
 
-## License
+# seed database
+$ yarn run setup:database:seed
+```
 
-Nest is [MIT licensed](LICENSE).
+## Definições da aplicação
+
+### Definição do endpoint
+```json
+POST /transactions/authorize
+BODY {
+  id: string, // id da transação
+  account: string, // id da conta de origem da transação
+  amount: number, // valor da transação
+  mcc: string, // 4 dígitos
+  merchant: string, // estabelecimento da transação
+}
+RESPONSES
+{"code": "00"} // autorização com sucesso
+{"code": "51"} // falta de saldo
+{"code": "07"} // erro na autorização
+```
+
+### Relação Tipo x MCC
+```
+{
+  food: ["5411", "5412"],
+  meal: ["5811", "5812"],
+  cash: any
+}
+```
+
+### Ferramentas utilizadas
+- **NestJs**: Framework Node + Typescript, fornecendo boilerplate da aplicação, trazendo injeção de dependência, controle de testes, estrutura de módulos, entre outros.
+- **Knex**: Query builder para uso na integração com a base de dados, permitindo maior controle/flexibilidade que ORMs.
+- **Postgres**: Base de dados utilizada no projeto.
+- **K6**: Utilizado durante o desenvolvimento da aplicação para realização de testes de performance x carga e para simulação de paralelismo.
+
+### Decisões
+
+#### Estrutura do projeto
+Uso de injeção de dependência e abstração da camada de aplicação (repositories/integraçao com base de dados), permitindo maior flexibilidade na mudança de ferramentas.
+
+#### Domínio x Repository
+A regra de negócio da aplicação foi implementada na camada de domínio, assim mantendo suas regras centralizadas. Ou seja, regra de autorização, incluindo validação e cálculo de saldo, decisão de resposta e retentativas de autorização realizadas na camada de domínio (_UseCase_ e Entidades).
+
+A implementação do respository é _responsável_ apenas para controlar a integração com o banco de dados, sendo buscas, inserções e atualização de novos dados e controle de _transactions_.
+
+#### Controle de concorrência de transações de mesma conta
+A realização da atualização do saldo e formalização da compra é realizada em _transactions_, que bloqueiam o uso do dado de conta (uso ___forUpdate___). Como toda a regra de cálculo é realizada na camada de domínio, é realizado uma checagem da consistência do dado da conta durante a execução da _transaction_, caso o dado esteja incossistente a _transaction_ é abortada emitindo erro. Assim o próprio _useCase_ se encarrega a decisão de realizar o retry, reprocessando a compra.
+
+#### Clusterização da aplicação
+Dado que o NodeJs é _single-threading_, para algumas aplicação de dependem de maior performance, poder ser oportuno o uso da solução de _Cluster_ oferecido pela ferramenta. Assim é possível executar a mesma como _multi-threading_
+
+### Possíveis melhorias no projeto
+Dado um projeto de exemplo e para estudo, alguns pontos não foram contemplados. Assim possíveis melhorias são:
+- Melhoria na tipagem dos valores númericos, seguindo o formato de moeda e controlando melhor os cálculos feitos. 
+- Criação de uma tabela específica para o saldo de uma conta por tipo, sendo um relação Conta 1:N SaldoTipo. Assim, o bloqueio realizado durante a autorização será feito apenas no saldo de um tipo da conta, permitindo mais execuções em paralelo, até mesmo considerando a mesma conta, podemos melhorar a performance da aplicação.
+- Criação dos relacionamentos dentro das tabelas, permitindo queries mais complexas na base de dados. Dado a simplicidade do projeto e o contexto, essa relação foi considerada apenas na própria implementação do código.
+- Criação de um cache para estabalecimentos, diminuindo a quantidade de chamadas ao banco pra busca dos mesmos, melhorando a performance da aplicação.
+- Emissão de eventos durante o fluxo de autorização, criando uma arquitetura mais _event-driven_, disponibilizando os resultados para outros serviços.
+- Adição de logs, ferramentas de observabilidade e _health checks_.
